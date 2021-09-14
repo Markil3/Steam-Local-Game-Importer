@@ -1,0 +1,498 @@
+#!/usr/bin/env python
+from steamctl.clients import CachingSteamClient
+import sys
+import json
+import requests
+from pathlib import Path
+from argparse import Namespace
+from io import StringIO
+
+steamClient = False
+
+class App:
+    appId = 0
+    name = ""
+    executable = ""
+    start = ""
+    icon = ""
+    shortcut = ""
+    options = ""
+    hidden = False
+    desktopConfig = False
+    overlay = False
+    vr = False
+    devkit = False
+    devkitId = ""
+    playTime = 0
+    tags = "null"
+    
+    def __init__(self, appId):
+        self.appId = appId
+    
+    def __repr__(self):
+        return "App %s (%s at %s)" % (self.appId, self.name, self.executable)
+    
+    def __hash__(self):
+        return self.appId
+    
+    def __eq__(self, other):
+        if self.appId != other.appId:
+            return False
+        if self.name != other.name:
+            return False
+        if self.executable != other.executable:
+            return False
+        if self.start != other.start:
+            return False
+        if self.icon != other.icon:
+            return False
+        if self.shortcut != other.shortcut:
+            return False
+        if self.options != other.options:
+            return False
+        if self.hidden != other.hidden:
+            return False
+        if self.desktopConfig != other.desktopConfig:
+            return False
+        if self.overlay != other.overlay:
+            return False
+        if self.vr != other.vr:
+            return False
+        if self.devkit != other.devkit:
+            return False
+        if self.devkitId != other.devkitId:
+            return False
+        if self.playTime != other.playTime:
+            return False
+        if self.tags != other.tags:
+            return False
+        return True
+
+def parseShortcuts(shortcutFile):
+    data = []
+    with open(shortcutFile, 'rb') as shortcutData:
+        rawData = shortcutData.read()
+        i = 0
+        buffer = bytearray()
+        app = None
+        while i < len(rawData):
+            buffer.append(rawData[i])
+            try:
+                buffCont = buffer.decode()
+            except UnicodeDecodeError:
+                #print(rawData[:i])
+                #print("Clearing buffer %s after %d" % (buffer[:-1].decode(), buffer[-1]))
+                buffer.clear()
+                buffCont = ""
+            found = True
+            if buffCont.endswith("shortcuts"):
+                buffer.clear()
+                i += 2
+                while rawData[i] != 2:
+                    buffer.append(rawData[i])
+                    i += 1
+                data.append({
+                    "shortcuts": buffer[:-1].decode()
+                })
+            if buffCont.endswith("appid"):
+                buffer.clear()
+                i += 2
+                # Some app names do have a 1 for one of their bits
+                while rawData[i + 1:i + 8] != bytearray("AppName", "utf-8"):
+                    buffer.append(rawData[i])
+                    i += 1
+                app = App(int.from_bytes(buffer, "little"))
+                data.append(app)
+            elif buffCont.endswith("AppName"):
+                buffer.clear()
+                i += 2
+                while rawData[i + 1:i + 4] != bytearray("Exe", "utf-8"):
+                    buffer.append(rawData[i])
+                    i += 1
+                app.name = buffer[:-1].decode()
+            elif buffCont.endswith("Exe"):
+                buffer.clear()
+                i += 2
+                while rawData[i + 1:i + 9] != bytearray("StartDir", "utf-8"):
+                    buffer.append(rawData[i])
+                    i += 1
+                app.executable = buffer[:-1].decode()
+            elif buffCont.endswith("StartDir"):
+                buffer.clear()
+                i += 2
+                while rawData[i] != 0:
+                    buffer.append(rawData[i])
+                    i += 1
+                app.start = buffer.decode()
+            elif buffCont.endswith("icon"):
+                buffer.clear()
+                i += 2
+                while rawData[i + 1:i + 13] != bytearray("ShortcutPath", "utf-8"):
+                    buffer.append(rawData[i])
+                    i += 1
+                app.icon = buffer[:-1].decode()
+            elif buffCont.endswith("ShortcutPath"):
+                buffer.clear()
+                i += 2
+                while rawData[i + 1:i + 14] != bytearray("LaunchOptions", "utf-8"):
+                    buffer.append(rawData[i])
+                    i += 1
+                app.shortcut = buffer[:-1].decode()
+            elif buffCont.endswith("LaunchOptions"):
+                buffer.clear()
+                i += 2
+                while rawData[i + 1:i + 9] != bytearray("IsHidden", "utf-8"):
+                    buffer.append(rawData[i])
+                    i += 1
+                app.options = buffer[:-1].decode()
+            elif buffCont.endswith("IsHidden"):
+                buffer.clear()
+                i += 2
+                while len(buffer) < 3:
+                    buffer.append(rawData[i])
+                    i += 1
+                app.hidden = int.from_bytes(buffer, "little")
+            elif buffCont.endswith("AllowDesktopConfig"):
+                buffer.clear()
+                i += 2
+                while len(buffer) < 3:
+                    buffer.append(rawData[i])
+                    i += 1
+                app.desktopConfig = int.from_bytes(buffer, "little")
+            elif buffCont.endswith("AllowOverlay"):
+                buffer.clear()
+                i += 2
+                while len(buffer) < 3:
+                    buffer.append(rawData[i])
+                    i += 1
+                app.overlay = int.from_bytes(buffer, "little")
+            elif buffCont.endswith("OpenVR"):
+                buffer.clear()
+                i += 2
+                while len(buffer) < 3:
+                    buffer.append(rawData[i])
+                    i += 1
+                app.vr = int.from_bytes(buffer, "little")
+            elif buffCont.endswith("Devkit") and type(app.devkit) == bool:
+                buffer.clear()
+                i += 2
+                while len(buffer) < 3:
+                    buffer.append(rawData[i])
+                    i += 1
+                app.devkit = int.from_bytes(buffer, "little")
+            elif buffCont.endswith("DevkitGameID"):
+                buffer.clear()
+                i += 2
+                while rawData[i + 1:i + 13] != bytearray("LastPlayTime", "utf-8"):
+                    buffer.append(rawData[i])
+                    i += 1
+                app.devkitId = buffer[:-1].decode()
+            elif buffCont.endswith("LastPlayTime"):
+                buffer.clear()
+                i += 2
+                while len(buffer) < 4:
+                    buffer.append(rawData[i])
+                    i += 1
+                app.playTime = int.from_bytes(buffer, "little")
+            elif buffCont.endswith("tags"):
+                buffer.clear()
+                i += 2
+                while i < len(rawData) and rawData[i] != 2:
+                    buffer.append(rawData[i])
+                    i += 1
+                if i < len(rawData) and rawData[i] == 2:
+                    buffer = buffer[:-1]
+                app.tags = buffer.decode()
+            else:
+                found = False
+            #print('\r' + buffCont, end='')
+            if found:
+                #try:
+                    #print(": %s" % buffer.decode())
+                #except UnicodeDecodeError:
+                    #print(": %s" % int.from_bytes(buffer, "little"))
+                buffer.clear()
+            i += 1
+    return data
+
+def writeShortcuts(apps, shortcutFile):
+    encoding = "utf-8"
+    data = bytearray([0x00])
+    for app in apps:
+        if type(app) == dict:
+            data += bytearray("shortcuts", encoding)
+            data.append(0x00)
+            data += bytearray(apps[0]["shortcuts"], encoding)
+        else:
+            data.append(0x00)
+            data.append(0x02)
+            data += bytearray("appid", encoding)
+            data.append(0x00)
+            data += int(app.appId).to_bytes(4, "little")
+            data.append(0x01)
+            data += bytearray("AppName", encoding)
+            data.append(0x00)
+            data += bytearray(app.name, encoding)
+            data.append(0x00)
+            data.append(0x01)
+            data += bytearray("Exe", encoding)
+            data.append(0x00)
+            data += bytearray(app.executable, encoding)
+            data.append(0x00)
+            data.append(0x01)
+            data += bytearray("StartDir", encoding)
+            data.append(0x00)
+            data += bytearray(app.start, encoding)
+            data.append(0x00)
+            data.append(0x01)
+            data += bytearray("icon", encoding)
+            data.append(0x00)
+            data += bytearray(app.icon, encoding)
+            data.append(0x00)
+            data.append(0x01)
+            data += bytearray("ShortcutPath", encoding)
+            data.append(0x00)
+            data += bytearray(app.shortcut, encoding)
+            data.append(0x00)
+            data.append(0x01)
+            data += bytearray("LaunchOptions", encoding)
+            data.append(0x00)
+            data += bytearray(app.options, encoding)
+            data.append(0x00)
+            data.append(0x02)
+            data += bytearray("IsHidden", encoding)
+            data.append(0x00)
+            data += int(app.hidden).to_bytes(3, "little")
+            data.append(0x00)
+            data.append(0x02)
+            data += bytearray("AllowDesktopConfig", encoding)
+            data.append(0x00)
+            data += int(app.desktopConfig).to_bytes(3, "little")
+            data.append(0x00)
+            data.append(0x02)
+            data += bytearray("AllowOverlay", encoding)
+            data.append(0x00)
+            data += int(app.overlay).to_bytes(3, "little")
+            data.append(0x00)
+            data.append(0x02)
+            data += bytearray("OpenVR", encoding)
+            data.append(0x00)
+            data += int(app.vr).to_bytes(3, "little")
+            data.append(0x00)
+            data.append(0x02)
+            data += bytearray("Devkit", encoding)
+            data.append(0x00)
+            data += int(app.devkit).to_bytes(3, "little")
+            data.append(0x00)
+            data.append(0x01)
+            data += bytearray("DevkitGameID", encoding)
+            data.append(0x00)
+            data += bytearray(app.devkitId, encoding)
+            data.append(0x00)
+            data.append(0x02)
+            data += bytearray("LastPlayTime", encoding)
+            data.append(0x00)
+            data += int(app.playTime).to_bytes(4, "little")
+            data.append(0x00)
+            data += bytearray("tags", encoding)
+            data.append(0x00)
+            data += bytearray(app.tags, encoding)
+    with open(shortcutFile, 'wb') as stream:
+        stream.write(data)
+
+def getSteamArgs():
+    global steamClient
+    if not steamClient:
+        args = Namespace()
+        args.user = None
+        args.anonymous = True
+        args.skip_licenses = True
+        steamClient = CachingSteamClient()
+        print("Logging into steam")
+        steamClient.login_from_args(args)
+    return steamClient
+
+def getHeader(code):
+    return "https://cdn.cloudflare.steamstatic.com/steam/apps/%s/header.jpg" % code
+
+def getLibraryTall(code):
+    return "https://cdn.cloudflare.steamstatic.com/steam/apps/%s/library_600x900.jpg" % code
+
+def getBackground(code):
+    return "https://cdn.cloudflare.steamstatic.com/steam/apps/%s/library_hero.jpg" % code
+
+def getLogo(code):
+    return "https://cdn.cloudflare.steamstatic.com/steam/apps/%s/logo.png" % code
+
+def getGameInfo(code):
+    fromContent = requests.get(fromURL, allow_redirects=True)
+    return "https://cdn.cloudflare.steamstatic.com/steam/apps/%s/logo.png" % code
+
+def copyContent(name, content, byte=True):
+    userdata = Path(Path.home(), ".steam", "root", "userdata")
+    for user in userdata.iterdir():
+        toFile = Path(user, name)
+        print("Writing to %s" % (toFile))
+        mode = 'w'
+        if byte:
+            mode += 'b'
+        with open(toFile, mode) as stream:
+            stream.write(content)
+
+def copyFile(fromURL, toCode):
+    fromURLComp = fromURL.split('/')
+    fromName = fromURLComp[6]
+    fromCode = fromURLComp[5]
+    userdata = Path(Path.home(), ".steam", "root", "userdata")
+    
+    # Gets the final file name
+    if fromName == "library_hero.jpg":
+        toName = "_hero.jpg"
+    elif fromName == "library_600x900.jpg":
+        toName = "p.jpg"
+    elif fromName == "header.jpg":
+        toName = ".jpg"
+    else:
+        toName = "_" + fromName
+    toName = toCode + toName
+    
+    print("Copying %s (%s) to %s" % (fromName, fromCode, toName))
+    fromContent = requests.get(fromURL, allow_redirects=True)
+    copyContent(Path("config", "grid", toName), fromContent.content)
+
+def copyContents(ids):
+    client = getSteamArgs()
+    fromCodes = []
+    toCodes = []
+    reverse = {}
+    for id in ids:
+        fromCode = id[0]
+        toCode = id[1]
+        reverse[toCode] = fromCode
+        fromCodes.append(fromCode)
+        toCodes.append(toCode)
+        copyFile(getHeader(str(fromCode)), str(toCode))
+        copyFile(getLibraryTall(str(fromCode)), str(toCode))
+        copyFile(getBackground(str(fromCode)), str(toCode))
+        copyFile(getLogo(str(fromCode)), str(toCode))
+    data = client.get_product_info(apps=fromCodes)
+    i = 0
+    for i in range(len(ids)):
+        logo = data["apps"][ids[i][0]]["common"]["library_assets"]["logo_position"]
+        logo2 = {
+            "nversion": 1,
+            "logoPosition": {
+                "pinnedPosition": logo["pinned_position"],
+                "nWidthPct": logo["width_pct"],
+                "nHeightPct": logo["height_pct"]
+            }
+        }
+        copyContent(Path("config", "grid", str(ids[i][1]) + ".json"), json.dumps(logo2), byte=False)
+        
+        logo2 = [[
+                "achievements", {
+                    "version":2,
+                    "data": {
+                        "vecHighlight": [],
+                        "vecUnachieved": [],
+                        "vecAchievedHidden": [],
+                        "nTotal": 0,
+                        "nAchieved": 0
+                    }
+                }
+            ], [
+                "customimage", {
+                    "version": 1,
+                    "data": logo2
+                }
+            ]
+        ]
+        copyContent(Path("config", "librarycache", str(ids[i][1]) + ".json"), json.dumps(logo2), byte=False)
+    
+    userdata = Path(Path.home(), ".steam", "root", "userdata")
+    for user in userdata.iterdir():
+        shortcutData = parseShortcuts(Path(user, "config", "shortcuts.vdf"))
+        for app in shortcutData:
+            if type(app) != dict:
+                if app.appId in toCodes:
+                    print("Setting shortcut data for %s", app.name)
+                    app.name = data["apps"][reverse[app.appId]]["common"]["name"]
+                    app.icon = str(Path(user, "config", "grid", str(app.appId) + ".jpg"))
+                    print("Setting %s to %s" % (app.name, app.icon))
+        writeShortcuts(shortcutData, Path(user, "config", "shortcuts.vdf"))
+        
+    
+if __name__ == "__main__":
+    keys = []
+    ids = []
+    ops = []
+    for term in sys.argv[1:]:
+        if not term.startswith('-'):
+            keys.append(term)
+            if term.isnumeric():
+                if len(ids) > 0 and type(ids[-1]) == int:
+                    ids[-1] = (ids[-1], int(term))
+                else:
+                    ids.append(int(term))
+            else:
+                ids = None
+        else:
+            if term[1] == '-':
+                ops.append(term[2:])
+            else:
+                for op in term[1:]:
+                    ops.append(op)
+    if len(keys) < 2 and not "a" in ops:
+        print("%s [OPTIONS] (<fromId> <toId>)..." % __file__)
+        print("%s [OPTIONS] <term>..." % __file__)
+        exit(1)
+    if ids:
+        if type(ids[-1]) == int:
+            print("Must have an even number of fromID - toId pairs")
+            exit(2)
+    
+        copyContents(ids)
+    else:
+        tempApps = {}
+        apps = []
+        userdata = Path(Path.home(), ".steam", "root", "userdata")
+        for user in userdata.iterdir():
+            shortcutData = parseShortcuts(Path(user, "config", "shortcuts.vdf"))
+            for app in shortcutData:
+                if type(app) != dict:
+                    if "a" in ops:
+                        apps.append(app)
+                    else:
+                        for term in keys:
+                            if term.lower() in app.name.lower():
+                                if not app in tempApps:
+                                    tempApps[app] = 1
+                                else:
+                                    tempApps[app] += 1
+        if not "a" in ops:
+            for app in tempApps:
+                if tempApps[app] / len(keys) >= 0.7:
+                    apps.append(app)
+        if len(apps) == 0:
+            if "v" in ops:
+                print("No matches found")
+            exit(0)
+        elif len(apps) == 1 and not "v" in ops and not "l" in ops:
+            print(apps[0].appId)
+        else:
+            for app in apps:
+                print("%d - %s" % (app.appId, app.name))
+                if "l" in ops:
+                    print("\tExecutable: %s" % app.executable)
+                    print("\tRuntime Directory: %s" % app.start)
+                    print("\tIcon: %s" % app.icon)
+                    print("\tShortcut: %s" % app.shortcut)
+                    print("\tRuntime Options: %s" % app.options)
+                    print("\tIs Hidden: %s" % bool(app.hidden))
+                    print("\tDesktop Configuration: %s" % bool(app.desktopConfig))
+                    print("\tOverlay Enabled: %s" % bool(app.overlay))
+                    print("\tIs VR: %s" % bool(app.vr))
+                    print("\tDevkit: %d" % app.devkit)
+                    print("\tDevkit ID: %s" % app.devkitId)
+                    print("\tDate of last Play: %s" % app.playTime)
+                    print("\tTags: %s" % app.tags)
