@@ -6,8 +6,10 @@ import requests
 from pathlib import Path
 from argparse import Namespace
 from io import StringIO
+import winreg
 
 steamClient = False
+userdata = None
 
 class App:
     """
@@ -469,9 +471,10 @@ def copyContent(name, content, byte=True):
         Whether or not to write in bytenode. Defaults to true.
     """
     
-    userdata = Path(Path.home(), ".steam", "root", "userdata")
     for user in userdata.iterdir():
         toFile = Path(user, name)
+        if not toFile.parent.is_dir():
+            toFile.parent.mkdir(parents=True)
         print("Writing to %s" % (toFile))
         mode = 'w'
         if byte:
@@ -497,8 +500,7 @@ def copyFile(fromURL, toCode):
     
     fromURLComp = fromURL.split('/')
     fromName = fromURLComp[6]
-    fromCode = fromURLComp[5]
-    userdata = Path(Path.home(), ".steam", "root", "userdata")
+    fromCode = fromURLComp[5]\
     
     # Gets the final file name
     if fromName == "library_hero.jpg":
@@ -513,6 +515,7 @@ def copyFile(fromURL, toCode):
     
     print("Copying %s (%s) to %s" % (fromName, fromCode, toName))
     fromContent = requests.get(fromURL, allow_redirects=True)
+    
     copyContent(Path("config", "grid", toName), fromContent.content)
 
 def copyContents(ids):
@@ -552,7 +555,7 @@ def copyContents(ids):
         # Generate the positioning data for logos and such
         logo = data["apps"][ids[i][0]]["common"]["library_assets"]["logo_position"]
         logo2 = {
-            "nversion": 1,
+            "nVersion": 1,
             "logoPosition": {
                 "pinnedPosition": logo["pinned_position"],
                 "nWidthPct": logo["width_pct"],
@@ -577,13 +580,12 @@ def copyContents(ids):
             ], [
                 "customimage", {
                     "version": 1,
-                    "data": logo2
+                    "data": logo2["logoPosition"]
                 }
             ]
         ]
         copyContent(Path("config", "librarycache", str(ids[i][1]) + ".json"), json.dumps(logo2), byte=False)
-    
-    userdata = Path(Path.home(), ".steam", "root", "userdata")
+
     # Write the actual shortcut data.
     for user in userdata.iterdir():
         shortcutData = parseShortcuts(Path(user, "config", "shortcuts.vdf"))
@@ -624,10 +626,25 @@ if __name__ == "__main__":
             else:
                 for op in term[1:]:
                     ops.append(op)
-    if len(keys) < 2 and not "a" in ops:
+    if len(keys) < 1 and not "a" in ops:
         print("%s [OPTIONS] (<fromId> <toId>)..." % __file__)
         print("%s [OPTIONS] <term>..." % __file__)
         exit(1)
+        
+    # Find the steam installation directory.
+    try:
+        import winreg
+        hkey = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\WOW6432Node\Valve\Steam")
+        if hkey:
+            userdata = Path(winreg.QueryValueEx(hkey, "InstallPath")[0], "userdata")
+    except:
+        hkey = None
+    if not userdata:
+        userdata = Path(Path.home(), ".steam", "root", "userdata")
+    if not userdata:
+        print("Could not find Steam installation directory.", file=sys.stderr)
+        exit(1)
+        
     if ids:
         # In this event, we make sure that all IDs have a mapping, by checking
         # the last index.
@@ -639,12 +656,12 @@ if __name__ == "__main__":
     else:
         tempApps = {}
         apps = []
-        # Find the steam installation directory.
-        userdata = Path(Path.home(), ".steam", "root", "userdata")
+        
         # Loop through all user folders
         for user in userdata.iterdir():
             # The shortcut file contain a collection of games that the client recognizes
             shortcutData = parseShortcuts(Path(user, "config", "shortcuts.vdf"))
+            # Obtain 
             for app in shortcutData:
                 if type(app) != dict:
                     if "a" in ops:
