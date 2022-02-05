@@ -598,11 +598,43 @@ def copyContents(ids):
                     print("Setting %s to %s" % (app.name, app.icon))
         writeShortcuts(shortcutData, Path(user, "config", "shortcuts.vdf"))
         
-    
-if __name__ == "__main__":
+def printHelp():
+    print("""%s [OPTIONS] (<fromId> <toId>)...
+    Downloads information on one steam app and registers it under another.
+%s [OPTIONS] <term>...
+    Searches for installed steam apps that match the provided search terms and prints information to the output.
+
+ARGUMENTS
+fromId
+    The game to change the client information for. This can be obtained from the steam client by going to the game properties and checking the "Updates" menu. It will be found under "App ID."
+    This must always be paired with toId
+
+toId
+    The game to download client information about. This can be found by finding the game on www.steamdb.com and finding the App ID in the information table.
+    Note that the ID does not necessarily need to exist already. If an ID that is not within the list of shortcuts is added, a new one will be created and added to the client. In this case, using flags like --name, --target, and --dir must be used to add information about the executable manually.
+    This must always be paired with a preceding fromId.
+
+term
+    Providing search terms has the application search for installed apps, printing information to the output. Use -a to just print all applications.
+
+OPTIONS
+-h, --help
+    Print this message
+-a
+    Prints information on all installed apps.
+-l
+    Prints detailed information found on applications found in the search.
+-v
+    Verbose output
+--args
+    Prints all arguments.
+""" % (Path(__file__).name, Path(__file__).name))
+
+if __name__ == "__main__":        
     keys = []
     ids = []
     ops = []
+    opArgs = {}
     # Gather the parameters
     for term in sys.argv[1:]:
         if not term.startswith('-'):
@@ -622,10 +654,34 @@ if __name__ == "__main__":
                 ids = None
         else:
             if term[1] == '-':
-                ops.append(term[2:])
+                if '=' in term:
+                    ops.append(term[2:term.index('=')])
+                    opArgs[ops[-1]] = term[term.index('=') + 1:]
+                    if opArgs[ops[-1]][0] == '"' and opArgs[ops[-1]][-1] == '"' or opArgs[ops[-1]][0] == '\'' and opArgs[ops[-1]][-1] == '\'':
+                        # Remove quotation marks used to demark the argument
+                        opArgs[ops[-1]] = opArgs[ops[-1]][1:-1]
+                else:
+                    ops.append(term[2:])
             else:
                 for op in term[1:]:
                     ops.append(op)
+        
+    if "args" in ops:
+        print("Keys:")
+        for key in keys:
+            print("\t%s" % key)
+        print("Flags:")
+        for op in ops:
+            if op in opArgs:
+                print("\t%s = %s" % (op, opArgs[op]))
+            else:
+                print("\t%s" % op)
+        print()
+        
+    if "h" in ops or "help" in ops:
+        printHelp()
+        exit(0)
+        
     if len(keys) < 1 and not "a" in ops:
         print("%s [OPTIONS] (<fromId> <toId>)..." % __file__)
         print("%s [OPTIONS] <term>..." % __file__)
