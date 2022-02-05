@@ -10,6 +10,41 @@ from io import StringIO
 steamClient = False
 
 class App:
+    """
+    A class representing an app added to Steam.
+    
+    This information is pulled from the shortcuts.vdf file with the
+    #parseShortcuts method. 
+    
+    Attributes
+    ----------
+    appId : int
+        The ID of the application as represented in steam
+    name : str
+        The display name of the app
+    executable : str
+        The link to the executable file.
+    start : str, Path
+        The path to start the app in
+    icon : str
+        The path to the icon file that Steam uses. If empty, then the icon of the executable is used in Windows installations.
+    shortcut : str
+    options : str
+        Command-line arguments to use when launching the executable.
+    hidden : bool
+        Whether or not the app is hidden from the client. Defaults to false.
+    desktopConfig : bool
+    overlay : bool
+        Whether or not the steam overlay can display on this game.
+    vr : bool
+        Whether or not the app is VR enabled.
+    devkit : bool
+    devkitId: str
+    playTime: long
+        The date that the application was last launched.
+    tags: str
+    """
+    
     appId = 0
     name = ""
     executable = ""
@@ -69,6 +104,23 @@ class App:
         return True
 
 def parseShortcuts(shortcutFile):
+    """Parses the "userdata/<userId>/config/shortcuts.vdf" file.
+    
+    This file contains all the information about what non-steam apps are
+    installed in the steam client. This method parses the bytecode and returns
+    the apps obtained.
+    
+    Parameters
+    ----------
+    shortcutFile : str, Path
+        The path to the shortcuts.vdf file to parse.
+       
+    Returns
+    -------
+    list
+        A list of apps contained within the shortcut file.
+    """
+    
     data = []
     with open(shortcutFile, 'rb') as shortcutData:
         rawData = shortcutData.read()
@@ -216,6 +268,20 @@ def parseShortcuts(shortcutFile):
     return data
 
 def writeShortcuts(apps, shortcutFile):
+    """Writes app data to the shortcut file.
+    
+    The shortcut file will be completely overwritten. As such, we can take the
+    opporunity to add whatever apps we want.
+    
+    Parameters
+    ----------
+    apps : list
+        A list of apps to write.
+    shortcutFile : str, Path
+        The path to the shortcuts.vdf file to write. It will be created if
+        needed.
+    """
+    
     encoding = "utf-8"
     data = bytearray([0x00])
     for app in apps:
@@ -301,6 +367,14 @@ def writeShortcuts(apps, shortcutFile):
         stream.write(data)
 
 def getSteamArgs():
+    """Logs into the steam client as an anonymous user. This allows us to
+    download information on apps not installed.
+    
+    Returns
+    -------
+    The interface to Steam.
+    """
+    
     global steamClient
     if not steamClient:
         args = Namespace()
@@ -313,22 +387,88 @@ def getSteamArgs():
     return steamClient
 
 def getHeader(code):
+    """Obtains the URL to the header image of a game.
+    
+    Parameters
+    ----------
+    code : int, str
+        The app ID of the game to get the header for.
+    
+    Returns
+    -------
+    str
+        The URL to the game's header image.
+    """
+    
     return "https://cdn.cloudflare.steamstatic.com/steam/apps/%s/header.jpg" % code
 
 def getLibraryTall(code):
+    """Obtains the URL to the box art image of a game.
+    
+    Parameters
+    ----------
+    code : int, str
+        The app ID of the game to get the box art for.
+    
+    Returns
+    -------
+    str
+        The URL to the game's box art image.
+    """
+    
     return "https://cdn.cloudflare.steamstatic.com/steam/apps/%s/library_600x900.jpg" % code
 
 def getBackground(code):
+    """Obtains the URL to the page background image of a game.
+    
+    Parameters
+    ----------
+    code : int, str
+        The app ID of the game to get the background for.
+    
+    Returns
+    -------
+    str
+        The URL to the game's page background image.
+    """
+    
     return "https://cdn.cloudflare.steamstatic.com/steam/apps/%s/library_hero.jpg" % code
 
 def getLogo(code):
+    """Obtains the URL to the logo image of a game.
+    
+    Parameters
+    ----------
+    code : int, str
+        The app ID of the game to get the logo for.
+    
+    Returns
+    -------
+    str
+        The URL to the game's logo image.
+    """
+    
     return "https://cdn.cloudflare.steamstatic.com/steam/apps/%s/logo.png" % code
 
 def getGameInfo(code):
+    """Deprecated"""
     fromContent = requests.get(fromURL, allow_redirects=True)
     return "https://cdn.cloudflare.steamstatic.com/steam/apps/%s/logo.png" % code
 
 def copyContent(name, content, byte=True):
+    """
+    Adds a file to all users.
+    
+    Parameters
+    ----------
+    name : str
+        The name of the file to add.
+    content : str, list
+        The content to write to the file.
+    byte : bool, optional
+        Whether or not to write in bytenode. Defaults to true.
+    """
+    
     userdata = Path(Path.home(), ".steam", "root", "userdata")
     for user in userdata.iterdir():
         toFile = Path(user, name)
@@ -340,6 +480,21 @@ def copyContent(name, content, byte=True):
             stream.write(content)
 
 def copyFile(fromURL, toCode):
+    """Downloads an image from one game on Steam and registers it under another
+    game.
+    
+    This essentially just downloads the image and stores it under the
+    appropriate name for the Steam client to find.
+    
+    Parameters
+    ----------
+    fromURL : str, URL
+        The URL of the image to download. The name of the file must be
+        "header.jpg," "library_600x900.jpg," "library_hero.jpg," or "logo.png."
+    toCode : int
+        The app ID of the game to register the images to.
+    """
+    
     fromURLComp = fromURL.split('/')
     fromName = fromURLComp[6]
     fromCode = fromURLComp[5]
@@ -361,23 +516,40 @@ def copyFile(fromURL, toCode):
     copyContent(Path("config", "grid", toName), fromContent.content)
 
 def copyContents(ids):
+    """Goes through a list of app ID mappings, downloading information on
+    "from" titles and mapping it to "to" titles, before writting that
+    information to the disk for the steam client to find.
+    
+    Parameters
+    ----------
+    ids : list
+        A two-dimensional list of numbers, where the first index of each
+        sub-list contains the app to download information from, and the second
+        is the ID of the app to store that information under.
+    """
+    
     client = getSteamArgs()
     fromCodes = []
     toCodes = []
     reverse = {}
     for id in ids:
+        # Get the mappings
         fromCode = id[0]
         toCode = id[1]
         reverse[toCode] = fromCode
         fromCodes.append(fromCode)
         toCodes.append(toCode)
+        # Copy the appropriate images from online
         copyFile(getHeader(str(fromCode)), str(toCode))
         copyFile(getLibraryTall(str(fromCode)), str(toCode))
         copyFile(getBackground(str(fromCode)), str(toCode))
         copyFile(getLogo(str(fromCode)), str(toCode))
+    # Obtains information on the apps to download from, notably logo positions
+    # and such.
     data = client.get_product_info(apps=fromCodes)
     i = 0
     for i in range(len(ids)):
+        # Generate the positioning data for logos and such
         logo = data["apps"][ids[i][0]]["common"]["library_assets"]["logo_position"]
         logo2 = {
             "nversion": 1,
@@ -387,8 +559,10 @@ def copyContents(ids):
                 "nHeightPct": logo["height_pct"]
             }
         }
+        # Stores the logo positioning to file.
         copyContent(Path("config", "grid", str(ids[i][1]) + ".json"), json.dumps(logo2), byte=False)
         
+        # Generate the data for other stuff.
         logo2 = [[
                 "achievements", {
                     "version":2,
@@ -410,6 +584,7 @@ def copyContents(ids):
         copyContent(Path("config", "librarycache", str(ids[i][1]) + ".json"), json.dumps(logo2), byte=False)
     
     userdata = Path(Path.home(), ".steam", "root", "userdata")
+    # Write the actual shortcut data.
     for user in userdata.iterdir():
         shortcutData = parseShortcuts(Path(user, "config", "shortcuts.vdf"))
         for app in shortcutData:
@@ -426,15 +601,22 @@ if __name__ == "__main__":
     keys = []
     ids = []
     ops = []
+    # Gather the parameters
     for term in sys.argv[1:]:
         if not term.startswith('-'):
+            # All non-flag arguments are added to keys, whether or not they are
+            # a steam game ID.
             keys.append(term)
+            # Append the ids
             if term.isnumeric():
                 if len(ids) > 0 and type(ids[-1]) == int:
                     ids[-1] = (ids[-1], int(term))
                 else:
                     ids.append(int(term))
             else:
+                # If we run into an argument that isn't either a flag or a steam
+                # id, then we must not have any IDs, and we are searching for a
+                # game.
                 ids = None
         else:
             if term[1] == '-':
@@ -447,6 +629,8 @@ if __name__ == "__main__":
         print("%s [OPTIONS] <term>..." % __file__)
         exit(1)
     if ids:
+        # In this event, we make sure that all IDs have a mapping, by checking
+        # the last index.
         if type(ids[-1]) == int:
             print("Must have an even number of fromID - toId pairs")
             exit(2)
@@ -455,29 +639,41 @@ if __name__ == "__main__":
     else:
         tempApps = {}
         apps = []
+        # Find the steam installation directory.
         userdata = Path(Path.home(), ".steam", "root", "userdata")
+        # Loop through all user folders
         for user in userdata.iterdir():
+            # The shortcut file contain a collection of games that the client recognizes
             shortcutData = parseShortcuts(Path(user, "config", "shortcuts.vdf"))
             for app in shortcutData:
                 if type(app) != dict:
                     if "a" in ops:
+                        # If the all flag was specified, then add all apps to
+                        # the list
                         apps.append(app)
                     else:
                         for term in keys:
+                            # Otherwise, record how many of the search terms
+                            # appear in the app title.
                             if term.lower() in app.name.lower():
                                 if not app in tempApps:
                                     tempApps[app] = 1
                                 else:
                                     tempApps[app] += 1
         if not "a" in ops:
+            # If we aren't listing all apps, find which apps are at least a 70%
+            # match.
             for app in tempApps:
                 if tempApps[app] / len(keys) >= 0.7:
                     apps.append(app)
         if len(apps) == 0:
             if "v" in ops:
+                # Verbose output.
                 print("No matches found")
             exit(0)
         elif len(apps) == 1 and not "v" in ops and not "l" in ops:
+            # If there is only one match and we aren't looking for details, we
+            # just print the app ID and be done with it.
             print(apps[0].appId)
         else:
             for app in apps:
