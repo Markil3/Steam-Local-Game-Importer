@@ -311,7 +311,10 @@ def writeShortcuts(apps, shortcutFile):
     i = 1
     for app in apps:
         data.append(0x00)
-        data.append(app.appIndx or i)
+        if app.appIndx > 0 and app.appIndx < 256:
+            data.append(app.appIndx)
+        else:
+            data.append(i)
         i += 1
         data += bytearray([0x00, 0x02])
         data += bytearray("appid", encoding)
@@ -595,47 +598,63 @@ def copyContents(ids):
     data = client.get_product_info(apps=fromCodes)
     i = 0
     for i in range(len(ids)):
+        if not ids[i][0] in data["apps"]:
+            print("Could not find app ID %s for %s" % (ids[i][0], ids[i][1]), file=sys.stderr)
+            continue
         # Generate the positioning data for logos and such
-        logo = data["apps"][ids[i][0]]["common"]["library_assets"]["logo_position"]
-        logo2 = {
-            "nVersion": 1,
-            "logoPosition": {
-                "pinnedPosition": logo["pinned_position"],
-                "nWidthPct": logo["width_pct"],
-                "nHeightPct": logo["height_pct"]
+        assets = data["apps"][ids[i][0]]
+        if not "common" in assets:
+            print("Could not find common data for %s from %s" % (ids[i], assets), file=sys.stderr)
+            continue
+        if not "library_assets" in assets["common"]:
+            print("Could not find common data for %s from %s" % (ids[i], assets), file=sys.stderr)
+            continue
+        if "logo_position" in assets["common"]["library_assets"]:
+            logo = assets["common"]["library_assets"]["logo_position"]
+            logo2 = {
+                "nVersion": 1,
+                "logoPosition": {
+                    "pinnedPosition": logo["pinned_position"],
+                    "nWidthPct": logo["width_pct"],
+                    "nHeightPct": logo["height_pct"]
+                }
             }
-        }
-        toCode = ids[i][1]
-        if isinstance(toCode, App):
-            toCode = toCode.appId
-        # Stores the logo positioning to file.
-        copyContent(Path("config", "grid", str(toCode) + ".json"), json.dumps(logo2), byte=False)
-        
-        # Generate the data for other stuff.
-        logo2 = [[
-                "achievements", {
-                    "version":2,
-                    "data": {
-                        "vecHighlight": [],
-                        "vecUnachieved": [],
-                        "vecAchievedHidden": [],
-                        "nTotal": 0,
-                        "nAchieved": 0
+            toCode = ids[i][1]
+            if isinstance(toCode, App):
+                toCode = toCode.appId
+            # Stores the logo positioning to file.
+            copyContent(Path("config", "grid", str(toCode) + ".json"), json.dumps(logo2), byte=False)
+            
+            # Generate the data for other stuff.
+            logo2 = [[
+                    "achievements", {
+                        "version":2,
+                        "data": {
+                            "vecHighlight": [],
+                            "vecUnachieved": [],
+                            "vecAchievedHidden": [],
+                            "nTotal": 0,
+                            "nAchieved": 0
+                        }
                     }
-                }
-            ], [
-                "customimage", {
-                    "version": 1,
-                    "data": logo2["logoPosition"]
-                }
+                ], [
+                    "customimage", {
+                        "version": 1,
+                        "data": logo2["logoPosition"]
+                    }
+                ]
             ]
-        ]
-        copyContent(Path("config", "librarycache", str(toCode) + ".json"), json.dumps(logo2), byte=False)
+            copyContent(Path("config", "librarycache", str(toCode) + ".json"), json.dumps(logo2), byte=False)
+        else:
+            print("No logo for %s %s" % (ids[i], json.dumps(assets, indent=4)), file=sys.stderr)
             
     # Write the actual shortcut data.
     for user in userdata.iterdir():
         shortcutPath = Path(user, "config", "shortcuts.vdf")
-        shortcutData = parseShortcuts(shortcutPath)
+        if shortcutPath.is_file():
+            shortcutData = parseShortcuts(shortcutPath)
+        else:
+            shortcutData = []
         toWrite = []
         for app in apps:
             toWrite.append(apps[app])
@@ -643,7 +662,7 @@ def copyContents(ids):
             # Add existing apps back to the queue
             if app.appId in apps:
                 eApp = apps[app.appId]
-                eApp.appIndx = eApp.appIndx or app.appIndx
+                eApp.appIndx = app.appIndx or eApp.appIndx
                 eApp.name = eApp.name.strip() or app.name.strip()
                 eApp.executable = eApp.executable.strip() or app.executable.strip()
                 eApp.start = eApp.start.strip() or app.start.strip()
@@ -705,11 +724,13 @@ OPTIONS
     Prints all arguments.
 """ % (Path(__file__).name, Path(__file__).name))
 
-if __name__ == "__main__":        
+if __name__ == "__main__":
     keys = []
     ids = []
     ops = []
     opArgs = {}
+    #for term in sys.argv[1:]:
+    #    print(term)
     # Gather the parameters
     for term in sys.argv[1:]:
         if not term.startswith('-'):
@@ -732,7 +753,7 @@ if __name__ == "__main__":
                 if '=' in term:
                     ops.append(term[2:term.index('=')])
                     opArgs[ops[-1]] = term[term.index('=') + 1:]
-                    if opArgs[ops[-1]][0] == '"' and opArgs[ops[-1]][-1] == '"' or opArgs[ops[-1]][0] == '\'' and opArgs[ops[-1]][-1] == '\'':
+                    if len(opArgs[ops[-1]]) > 0 and (opArgs[ops[-1]][0] == '"' and opArgs[ops[-1]][-1] == '"' or opArgs[ops[-1]][0] == '\'' and opArgs[ops[-1]][-1] == '\''):
                         # Remove quotation marks used to demark the argument
                         opArgs[ops[-1]] = opArgs[ops[-1]][1:-1]
                 else:
